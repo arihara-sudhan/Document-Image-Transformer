@@ -29,59 +29,51 @@ class Triplet:
     def __init__(self, train_folder):
         self.train_folder = train_folder
         self.labels = [label for label in os.listdir(train_folder) if label != '.ipynb_checkpoints']
-        self.label_to_path = {}
-        for label in self.labels:
-            label_path = os.path.join(train_folder, label)
-            subdirectories = [subdir for subdir in os.listdir(label_path) if os.path.isdir(os.path.join(label_path, subdir))]
-            self.label_to_path[label] = [os.path.join(label_path, subdir) for subdir in subdirectories]
-
+        self.label_to_path = {label: os.path.join(train_folder, label) for label in self.labels}
+    
     def get_triplet(self):
         anchor_label = random.choice(self.labels)
-        anchor_subdir = random.choice(self.label_to_path[anchor_label])
-        anchor_path = random.choice(os.listdir(anchor_subdir))
+        anchor_path = random.choice(os.listdir(self.label_to_path[anchor_label]))
         positive_label = anchor_label
-        positive_subdir = anchor_subdir
-        positive_path = random.choice(os.listdir(positive_subdir))
-        # Ensure the negative label is different from the positive label within the same superclass
-        negative_label = random.choice([label for label in self.labels if label != anchor_label or label not in self.label_to_path[anchor_label]])
-        negative_subdir = random.choice(self.label_to_path[negative_label])
-        negative_path = random.choice(os.listdir(negative_subdir))
-
-        anchor_image = os.path.join(anchor_subdir, anchor_path)
-        positive_image = os.path.join(positive_subdir, positive_path)
-        negative_image = os.path.join(negative_subdir, negative_path)
-
+        positive_path = random.choice(os.listdir(self.label_to_path[positive_label]))
+        negative_label = random.choice([label for label in self.labels if label != anchor_label])
+        negative_path = random.choice(os.listdir(self.label_to_path[negative_label]))
+        
+        anchor_image = os.path.join(self.label_to_path[anchor_label], anchor_path)
+        positive_image = os.path.join(self.label_to_path[positive_label], positive_path)
+        negative_image = os.path.join(self.label_to_path[negative_label], negative_path)
+        
         anchor_label_num = self.labels.index(anchor_label)
         positive_label_num = self.labels.index(positive_label)
         negative_label_num = self.labels.index(negative_label)
-
-        anchor_label_name = f"{anchor_label}-{os.path.basename(anchor_subdir)}"
-        positive_label_name = f"{positive_label}-{os.path.basename(positive_subdir)}"
-        negative_label_name = f"{negative_label}-{os.path.basename(negative_subdir)}"
-
-        return anchor_image, positive_image, negative_image, anchor_label_num, positive_label_num, negative_label_num, anchor_label_name, positive_label_name, negative_label_name
+        
+        return anchor_image, positive_image, negative_image
 
 class TripletDataset(Dataset):
-    def __init__(self, train_folder, length, transform=None):
+    def __init__(self, train_folder, length, transform=None,):
         self.triplet_generator = Triplet(train_folder)
         self.transform = transform
         self.length = length
 
     def __len__(self):
         return self.length
-
+    
     def __getitem__(self, index):
-        anchor_image, positive_image, negative_image, anchor_label_num, positive_label_num, negative_label_num, anchor_label_name, positive_label_name, negative_label_name = self.triplet_generator.get_triplet()
+        anchor_image, positive_image, negative_image = self.triplet_generator.get_triplet()
         anchor = self._load_image(anchor_image)
         positive = self._load_image(positive_image)
         negative = self._load_image(negative_image)
-        return anchor, positive, negative, anchor_label_num, positive_label_num, negative_label_num, anchor_label_name, positive_label_name, negative_label_name
+        return anchor, positive, negative
 
     def _load_image(self, image_path):
         image = Image.open(image_path).convert("RGB")
         if self.transform is not None:
             image = self.transform(image)
         return image
+
+    def get_triplet_names(self, index):
+        anchor_image, positive_image, negative_image = self.triplet_generator.get_triplet()
+        return anchor_image, positive_image, negative_image
 
 
 
@@ -132,15 +124,15 @@ class TripletLoss(nn.Module):
 # In[6]:
 
 
-train_folder = "./Datasets/DOCZ-II/train"
-bs = 4  # You can adjust this as nee
+train_folder = "/kaggle/input/ocredmergeddocs/MINI-DOCUMENTS/train"
+bs = 8  # You can adjust this as nee
 transform = transforms.Compose([
     transforms.Resize((224, 224)),  # Resize to 224x224
     transforms.ToTensor(),           # Convert to a PyTorch tensor
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize the tensor
 ])
 
-triplet_dataset = TripletDataset(train_folder, length=40000, transform=transform)  # Adjust the length as needed
+triplet_dataset = TripletDataset(train_folder, length=1714, transform=transform)  # Adjust the length as needed
 # Create a DataLoader
 train_data_loader = torch.utils.data.DataLoader(triplet_dataset, batch_size=bs, shuffle=True)
 
@@ -175,7 +167,7 @@ def fit(model, num_epochs, train_loader, bs):
         train_loss = 0.0
 
         for idx, batch in enumerate(train_loader):
-            anchor, positive, negative,_,_,_,_,_,_ = batch
+            anchor, positive, negative = batch
             anchor = anchor.to(device)
             positive = positive.to(device)
             negative = negative.to(device)
@@ -193,6 +185,5 @@ def fit(model, num_epochs, train_loader, bs):
             print(f"EPOCH: {epoch+1}. ({idx + 1}).  LOSS : {loss.item()}  SEEN : {bs * (idx + 1)}/{len(train_loader.dataset)}")
         print(f"Epoch {epoch + 1}/{n_epochs}, Train Loss: {train_loss / len(train_loader):.4f}, TIME: {time.time()-start}")
         scheduler.step()
-        torch.save(model.state_dict(), f"./Models/DOCZ{epoch+1}.pth")
 
 fit(model, n_epochs:=int(input("NO OF EPOCHS : ")), train_data_loader, bs)
